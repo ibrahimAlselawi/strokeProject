@@ -58,6 +58,9 @@ from shapely.ops import unary_union
 
 # Enable OSMnx logging so user sees progress
 ox.settings.log_console = True
+# Increase timeouts for large downloads (Ontario is huge)
+ox.settings.timeout = 600
+ox.settings.requests_timeout = 600
 
 from geopy.geocoders import Nominatim
 from geopy.extra.rate_limiter import RateLimiter
