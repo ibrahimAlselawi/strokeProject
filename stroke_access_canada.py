@@ -16,6 +16,38 @@ import os
 import sys
 import time
 
+# PyInstaller fix: Set GDAL_DATA if frozen
+if getattr(sys, 'frozen', False):
+    import glob
+    base_wd = sys._MEIPASS
+    # Look for gdal data in potential locations
+    potentials = [
+        os.path.join(base_wd, "gdal"),
+        os.path.join(base_wd, "share", "gdal"),
+        os.path.join(base_wd, "pyogrio", "gdal_data"),
+        os.path.join(base_wd, "osgeo", "data", "gdal"),
+    ]
+    # Also search for any folder named 'gdal-data' or similar
+    
+    found = False
+    for p in potentials:
+        if os.path.exists(p):
+            os.environ["GDAL_DATA"] = p
+            found = True
+            break
+    
+    if not found:
+        # Fallback: try to find any directory that looks like gdal data
+        # recursively is too slow, just check top level directories
+        try:
+            for root, dirs, files in os.walk(base_wd):
+                if "gdalvrt.xsd" in files:
+                    os.environ["GDAL_DATA"] = root
+                    break
+        except Exception:
+            pass
+
+
 import math
 import pandas as pd
 import geopandas as gpd
