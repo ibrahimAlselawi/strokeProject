@@ -1,0 +1,17 @@
+pandas
+numpy
+geopandas
+shapely
+pyproj
+pyyaml
+openpyxl
+osmnx
+networkx
+tqdm
+pyarrow
+statsmodels
+matplotlib
+contextily
+geopy
+requests
+pyinstaller

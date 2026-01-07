@@ -1,0 +1,52 @@
+name: Build Distributables
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        lfs: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+
+    - name: Build with PyInstaller
+      # --onefile: create a single executable
+      # --add-data: bundle the data files. Format is source;dest (Windows) or source:dest (Mac/Linux)
+      # We use a shell-agnostic way or separate commands if needed, but given the complexity, we'll try to rely on the script finding files relative to itself or use specific separators.
+      # Actually, simplest is to let the script handle external files if they are huge, but the user wants to distribute ONE thing.
+      # However, packing 400MB into the exe makes it slow to start.
+      # But the user asked "how i am supposte to do so". Bundling is best for "non technical".
+      # Note: PyInstaller separator is ; on Windows, : on Unix.
+      run: |
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          SEP=";"
+        else
+          SEP=":"
+        fi
+        pyinstaller --onefile --name stroke_access_canada --add-data "statcan_boundaries.gml${SEP}." --add-data "stroke_centers.xlsx${SEP}." stroke_access_canada.py
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: stroke-access-${{ matrix.os }}
+        path: |
+          dist/*.exe
+          dist/stroke_access_canada
