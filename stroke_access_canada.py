@@ -88,8 +88,8 @@ CENSUS_KEEP_COLS = [
 
 
 # STROKE_CENTRES_XLSX = resource_path("stroke_centers.xlsx") # <- OLD local file
-# Google Sheets URL (Export as CSV for "Master list" sheet)
-STROKE_CENTRES_URL = "https://docs.google.com/spreadsheets/d/1iswC1SgUTdS63Nve-5CyWh9H9H8xOpA247w6889vqj8/gviz/tq?tqx=out:csv&sheet=Master%20list"
+# Google Sheets URL (Export as CSV for "Master list" sheet) /gviz/tq?tqx=out:csv&sheet=Master%20list
+STROKE_CENTRES_URL = "https://docs.google.com/spreadsheets/d/1iswC1SgUTdS63Nve-5CyWh9H9H8xOpA247w6889vqj8"
 
 CENTRES_SHEET = "Master list"
 CENTRE_NAME_COL = "Hospital"
