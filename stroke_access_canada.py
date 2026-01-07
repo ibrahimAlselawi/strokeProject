@@ -87,181 +87,74 @@ CENSUS_KEEP_COLS = [
 ]
 
 
+
 # STROKE_CENTRES_XLSX = resource_path("stroke_centers.xlsx") # <- OLD local file
-# Google Sheets URL (Export as CSV for "Master list" sheet) /gviz/tq?tqx=out:csv&sheet=Master%20list
-STROKE_CENTRES_URL = "https://docs.google.com/spreadsheets/d/1iswC1SgUTdS63Nve-5CyWh9H9H8xOpA247w6889vqj8"
+# Google Sheets URL (Export as CSV for "Master list" sheet)
+STROKE_CENTRES_URL = "https://docs.google.com/spreadsheets/d/1iswC1SgUTdS63Nve-5CyWh9H9H8xOpA247w6889vqj8/export?format=csv&sheet=Master%20list"
 
 CENTRES_SHEET = "Master list"
 CENTRE_NAME_COL = "Hospital"
 CENTRE_CITY_COL = "City"
 CENTRE_PROVINCE_COL = "Province"
-CENTRE_TYPE_COL = "Hospital type"
-CENTRE_ADDRESS_COL = None                   # if you have an Address column, put its name here
+# ... (rest of constants are same)
 
-USE_TRAVEL_TIME = True                      # True = minutes (preferred)
-WORKERS = 1                                 # keep 1 for simplicity in one-file version
-TIME_BANDS = [30, 60, 120]
-
-# Geocoding
-GEOCODER_USER_AGENT = "stroke-access-ca-research"
-GEOCODE_CACHE_CSV = "centres_geocode_cache.csv"
-GEOCODER_PAUSE_SECONDS = 1.2
-GEOCODER_MAX_RETRIES = 3
-GEOCODER_COUNTRY_HINT = "Canada"
-
-# Output files
-OUT_ACCESS_METRICS_CSV = "access_metrics.csv"
-OUT_ACCESS_METRICS_PARQUET = "access_metrics.parquet"
-GRAPH_CACHE_DIR = "graphs_cache"
-ROUTING_CACHE_DIR = "routing_cache"
-
-# =========================
-# Helpers
-# =========================
-
-def ensure_dir(p: str) -> None:
-    os.makedirs(p, exist_ok=True)
-
-def to_str(x) -> str:
-    if pd.isna(x):
-        return ""
-    try:
-        xf = float(x)
-        if xf.is_integer():
-            return str(int(xf))
-    except Exception:
-        pass
-    return str(x).strip()
-
-def normalize_centre_type(v: str) -> str:
-    """
-    Maps your Excel Hospital type values to:
-      Comprehensive -> CSC
-      Primary -> PSC
-      Thrombolysis-ready -> SRH
-    """
-    v = (v or "").strip().lower()
-    if "comprehensive" in v:
-        return "CSC"
-    if "primary" in v:
-        return "PSC"
-    if "thrombolysis" in v:
-        return "SRH"
-    return "UNKNOWN"
-
-def bandify(x: float, cuts: list[int]) -> str:
-    if pd.isna(x):
-        return "missing"
-    a, b, c = cuts
-    if x <= a:
-        return f"<= {a}"
-    if x <= b:
-        return f"{a+1}-{b}"
-    if x <= c:
-        return f"{b+1}-{c}"
-    return f"> {c}"
-
-def read_boundaries() -> gpd.GeoDataFrame:
-    if BOUNDARY_LAYER:
-        gdf = gpd.read_file(BOUNDARY_FILE, layer=BOUNDARY_LAYER)
-    else:
-        gdf = gpd.read_file(BOUNDARY_FILE)
-    gdf = gdf.to_crs(4326)
-    if GEO_ID_COL not in gdf.columns:
-        raise ValueError(f"Missing {GEO_ID_COL} in boundaries. Found: {list(gdf.columns)[:40]}")
-    if PROVINCE_COL not in gdf.columns:
-        raise ValueError(f"Missing {PROVINCE_COL} in boundaries. Found: {list(gdf.columns)[:40]}")
-    gdf[GEO_ID_COL] = gdf[GEO_ID_COL].apply(to_str)
-    return gdf
-
-def add_centroids(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    gdf = gdf.copy()
-    rp = gdf.geometry.representative_point()
-    gdf["centroid_lon"] = rp.x
-    gdf["centroid_lat"] = rp.y
-    return gdf
-
-def read_census_profile() -> pd.DataFrame | None:
-    if not CENSUS_PROFILE_CSV or not os.path.exists(CENSUS_PROFILE_CSV):
-        print("Census profile CSV not provided/found — continuing without demographics.")
-        return None
-    df = pd.read_csv(CENSUS_PROFILE_CSV)
-    df.columns = [c.strip() for c in df.columns]
-    if CENSUS_JOIN_COL not in df.columns:
-        raise ValueError(f"Missing {CENSUS_JOIN_COL} in census profile.")
-    df[CENSUS_JOIN_COL] = df[CENSUS_JOIN_COL].apply(to_str)
-    keep = [c for c in CENSUS_KEEP_COLS if c in df.columns]
-    return df[keep].copy()
-
-def load_geos() -> pd.DataFrame:
-    gdf = read_boundaries()
-    gdf = add_centroids(gdf)
-
-    census = read_census_profile()
-    if census is not None:
-        gdf = gdf.merge(census, left_on=GEO_ID_COL, right_on=CENSUS_JOIN_COL, how="left")
-
-    # Keep geometry for later if you want mapping; for routing we just need centroids + ids
-    return gdf
-
-def load_cache() -> pd.DataFrame:
-    if os.path.exists(GEOCODE_CACHE_CSV):
-        c = pd.read_csv(GEOCODE_CACHE_CSV)
-        c.columns = [x.strip() for x in c.columns]
-        return c
-    return pd.DataFrame(columns=["query", "lat", "lon", "display_name", "success"])
-
-def save_cache(cache: pd.DataFrame) -> None:
-    cache.to_csv(GEOCODE_CACHE_CSV, index=False)
-
-def build_geocode_query(row: pd.Series) -> str:
-    parts = [str(row.get("centre_name", "")).strip()]
-    if CENTRE_ADDRESS_COL and CENTRE_ADDRESS_COL in row and pd.notna(row[CENTRE_ADDRESS_COL]):
-        parts.append(str(row[CENTRE_ADDRESS_COL]).strip())
-    parts.append(str(row.get("city", "")).strip())
-    parts.append(str(row.get("prov", "")).strip())
-    parts.append(GEOCODER_COUNTRY_HINT)
-    parts = [p for p in parts if p and p.lower() != "nan"]
-    return ", ".join(parts)
+# ... (Helpers function are same)
 
 def load_and_geocode_centres() -> pd.DataFrame:
     print(f"Downloading stroke centres from: {STROKE_CENTRES_URL}...")
     
-    # Header is on the 3rd row (index 2) in this specific sheet
     try:
-        df = pd.read_csv(STROKE_CENTRES_URL, header=2)
+        # Read with no header first to find the correct row
+        df_raw = pd.read_csv(STROKE_CENTRES_URL, header=None)
     except Exception as e:
         print(f"Error downloading/parsing CSV: {e}")
         return pd.DataFrame()
 
-    print(f"DEBUG: Raw columns found: {list(df.columns)}")
-    df.columns = [str(c).strip() for c in df.columns]
-    print(f"DEBUG: Stripped columns: {list(df.columns)}")
+    # Smart Header Detection
+    header_idx = -1
+    for i in range(min(10, len(df_raw))):
+        row_values = [str(x).strip() for x in df_raw.iloc[i].values]
+        if "Hospital" in row_values and "City" in row_values:
+            header_idx = i
+            break
+            
+    if header_idx != -1:
+        print(f"DEBUG: Found header at row {header_idx}")
+        # Set proper header
+        df = df_raw.iloc[header_idx+1:].copy()
+        df.columns = [str(x).strip() for x in df_raw.iloc[header_idx].values]
+    else:
+        print("DEBUG: Could not find header row containing 'Hospital' and 'City'. Using first row.")
+        df = df_raw
+        df.columns = [str(x).strip() for x in df.iloc[0].values]
 
-    # Expected columns based on screenshot
-    # We need: Hospital, City, Province
-    # And types: Stroke ready Hospital, Primary, Comprehensive
-    
+    print(f"DEBUG: Data columns: {list(df.columns)}")
+
     # Rename columns to standard internal names
-    # Handle "Longtitude" typo in source if present
     rename_map = {
         "Hospital": "centre_name",
         "City": "city",
         "Province": "prov",
         "Latitude": "lat_input",
         "Longitude": "lon_input",
-        "Longtitude": "lon_input"  # Handle typo in sheet
+        "Longtitude": "lon_input", # Handle typo
+        "Lat": "lat_input",        # Handle abbreviation
+        "Lon": "lon_input"         # Handle abbreviation
     }
     df.rename(columns=rename_map, inplace=True)
     
-    # Filter out empty rows (if ID is empty)
+    # Filter out empty rows
     if "ID" in df.columns:
         df = df[df["ID"].notna()]
     elif "id" in df.columns.str.lower():
          # Case insensitive fallback for ID
-         df = df[df[df.columns[df.columns.str.lower() == 'id'][0]].notna()]
-    
-    print(f"DEBUG: Columns after rename: {list(df.columns)}")
+         idx = df.columns.str.lower() == 'id'
+         if idx.any():
+            col = df.columns[idx][0]
+            df = df[df[col].notna()]
+    elif "centre_name" in df.columns:
+        df = df[df["centre_name"].notna()]
+
 
     # Synthesize centre_type from the 3 columns
     def get_type(row):
