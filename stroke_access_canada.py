@@ -228,8 +228,15 @@ def load_and_geocode_centres() -> pd.DataFrame:
     print(f"Downloading stroke centres from: {STROKE_CENTRES_URL}...")
     
     # Header is on the 3rd row (index 2) in this specific sheet
-    df = pd.read_csv(STROKE_CENTRES_URL, header=2)
-    df.columns = [c.strip() for c in df.columns]
+    try:
+        df = pd.read_csv(STROKE_CENTRES_URL, header=2)
+    except Exception as e:
+        print(f"Error downloading/parsing CSV: {e}")
+        return pd.DataFrame()
+
+    print(f"DEBUG: Raw columns found: {list(df.columns)}")
+    df.columns = [str(c).strip() for c in df.columns]
+    print(f"DEBUG: Stripped columns: {list(df.columns)}")
 
     # Expected columns based on screenshot
     # We need: Hospital, City, Province
@@ -242,13 +249,19 @@ def load_and_geocode_centres() -> pd.DataFrame:
         "City": "city",
         "Province": "prov",
         "Latitude": "lat_input",
-        "Longtitude": "lon_input",
+        "Longitude": "lon_input",
+        "Longtitude": "lon_input"  # Handle typo in sheet
     }
     df.rename(columns=rename_map, inplace=True)
     
     # Filter out empty rows (if ID is empty)
     if "ID" in df.columns:
         df = df[df["ID"].notna()]
+    elif "id" in df.columns.str.lower():
+         # Case insensitive fallback for ID
+         df = df[df[df.columns[df.columns.str.lower() == 'id'][0]].notna()]
+    
+    print(f"DEBUG: Columns after rename: {list(df.columns)}")
 
     # Synthesize centre_type from the 3 columns
     def get_type(row):
@@ -320,7 +333,7 @@ def load_and_geocode_centres() -> pd.DataFrame:
                 loc = geocode(q)
                 if loc is not None:
                     lat = float(loc.latitude)
-                    lon = float(loc.Longtitude)
+                    lon = float(loc.longitude)
                     dn = getattr(loc, "address", "") or ""
                     ok = True
                     break
