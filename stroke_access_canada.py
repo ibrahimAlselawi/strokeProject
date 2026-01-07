@@ -226,29 +226,48 @@ def build_geocode_query(row: pd.Series) -> str:
 
 def load_and_geocode_centres() -> pd.DataFrame:
     print(f"Downloading stroke centres from: {STROKE_CENTRES_URL}...")
-    # Read DIRECTLY from Google Sheets CSV export
-    df = pd.read_csv(STROKE_CENTRES_URL)
+    
+    # Header is on the 3rd row (index 2) in this specific sheet
+    df = pd.read_csv(STROKE_CENTRES_URL, header=2)
     df.columns = [c.strip() for c in df.columns]
 
+    # Expected columns based on screenshot
+    # We need: Hospital, City, Province
+    # And types: Stroke ready Hospital, Primary, Comprehensive
+    
+    # Rename columns to standard internal names
+    # Handle "Longtitude" typo in source if present
+    rename_map = {
+        "Hospital": "centre_name",
+        "City": "city",
+        "Province": "prov",
+        "Latitude": "lat_input",
+        "Longtitude": "lon_input",
+    }
+    df.rename(columns=rename_map, inplace=True)
+    
+    # Filter out empty rows (if ID is empty)
+    if "ID" in df.columns:
+        df = df[df["ID"].notna()]
 
-    for c in [CENTRE_NAME_COL, CENTRE_CITY_COL, CENTRE_PROVINCE_COL, CENTRE_TYPE_COL]:
-        if c not in df.columns:
-            raise ValueError(f"Missing column '{c}' in centres Excel. Found: {list(df.columns)[:40]}")
+    # Synthesize centre_type from the 3 columns
+    def get_type(row):
+        # Check "Comprehensive" first (highest level)
+        if str(row.get("Comprehensive", "")).strip().lower() == "yes":
+            return "CSC"
+        if str(row.get("Primary", "")).strip().lower() == "yes":
+            return "PSC"
+        if str(row.get("Stroke ready Hospital", "")).strip().lower() == "yes":
+            return "SRH"
+        return "UNKNOWN"
 
-    centres = df[[CENTRE_NAME_COL, CENTRE_CITY_COL, CENTRE_PROVINCE_COL, CENTRE_TYPE_COL]].copy()
-    centres.rename(columns={
-        CENTRE_NAME_COL: "centre_name",
-        CENTRE_CITY_COL: "city",
-        CENTRE_PROVINCE_COL: "prov",
-        CENTRE_TYPE_COL: "centre_type_raw",
-    }, inplace=True)
-
-    centres["centre_type"] = centres["centre_type_raw"].astype(str).apply(normalize_centre_type)
-    centres = centres[centres["centre_type"].isin(["SRH", "PSC", "CSC"])].copy()
-    centres = centres.drop_duplicates().reset_index(drop=True)
+    df["centre_type"] = df.apply(get_type, axis=1)
+    
+    # Filter only valid types
+    centres = df[df["centre_type"].isin(["SRH", "PSC", "CSC"])].copy()
+    centres = centres.drop_duplicates(subset=["centre_name", "city"]).reset_index(drop=True)
 
     cache = load_cache()
-
     geolocator = Nominatim(user_agent=GEOCODER_USER_AGENT)
     geocode = RateLimiter(
         geolocator.geocode,
@@ -258,11 +277,32 @@ def load_and_geocode_centres() -> pd.DataFrame:
 
     lats, lons, disp, ok_list = [], [], [], []
 
-    print(f"Geocoding {len(centres)} hospitals (cached in {GEOCODE_CACHE_CSV})...")
+    print(f"Processing {len(centres)} hospitals...")
 
     for _, r in tqdm(centres.iterrows(), total=len(centres)):
-        q = build_geocode_query(r)
+        # 1. Try to use existing lat/lon from Excel if available
+        # Check if lat_input/lon_input exist and are numbers
+        in_lat = r.get("lat_input", None)
+        in_lon = r.get("lon_input", None)
+        
+        valid_input = False
+        try:
+            flat = float(in_lat)
+            flon = float(in_lon)
+            if not pd.isna(flat) and not pd.isna(flon) and flat != 0 and flon != 0:
+                valid_input = True
+                lats.append(flat)
+                lons.append(flon)
+                disp.append("From Excel")
+                ok_list.append(True)
+        except Exception:
+            pass
+            
+        if valid_input:
+            continue
 
+        # 2. Fallback to Geocoding
+        q = build_geocode_query(r)
         hit = cache[cache["query"] == q]
         if not hit.empty:
             lats.append(hit.iloc[0]["lat"])
@@ -276,13 +316,16 @@ def load_and_geocode_centres() -> pd.DataFrame:
         ok = False
 
         for attempt in range(1, GEOCODER_MAX_RETRIES + 1):
-            loc = geocode(q)
-            if loc is not None:
-                lat = float(loc.latitude)
-                lon = float(loc.longitude)
-                dn = getattr(loc, "address", "") or ""
-                ok = True
-                break
+            try:
+                loc = geocode(q)
+                if loc is not None:
+                    lat = float(loc.latitude)
+                    lon = float(loc.Longtitude)
+                    dn = getattr(loc, "address", "") or ""
+                    ok = True
+                    break
+            except Exception:
+                pass
             time.sleep(float(GEOCODER_PAUSE_SECONDS) * attempt)
 
         lats.append(lat); lons.append(lon); disp.append(dn); ok_list.append(ok)
