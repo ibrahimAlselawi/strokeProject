@@ -42,7 +42,7 @@ jobs:
         else
           SEP=":"
         fi
-        pyinstaller --onefile --name stroke_access_canada --add-data "statcan_boundaries.gml${SEP}." --add-data "stroke_centers.xlsx${SEP}." stroke_access_canada.py
+        pyinstaller --onefile --name stroke_access_canada --copy-metadata osmnx --copy-metadata requests --copy-metadata geopandas --add-data "statcan_boundaries.gml${SEP}." --add-data "stroke_centers.xlsx${SEP}." stroke_access_canada.py
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
