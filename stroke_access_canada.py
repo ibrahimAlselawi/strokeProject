@@ -92,13 +92,134 @@ CENSUS_KEEP_COLS = [
 # Google Sheets URL (Export as CSV for "Master list" sheet)
 STROKE_CENTRES_URL = "https://docs.google.com/spreadsheets/d/1iswC1SgUTdS63Nve-5CyWh9H9H8xOpA247w6889vqj8/export?format=csv&sheet=Master%20list"
 
-CENTRES_SHEET = "Master list"
-CENTRE_NAME_COL = "Hospital"
-CENTRE_CITY_COL = "City"
-CENTRE_PROVINCE_COL = "Province"
-# ... (rest of constants are same)
+CENTRE_TYPE_COL = "Hospital type"
+CENTRE_ADDRESS_COL = None                   # if you have an Address column, put its name here
 
-# ... (Helpers function are same)
+USE_TRAVEL_TIME = True                      # True = minutes (preferred)
+WORKERS = 1                                 # keep 1 for simplicity in one-file version
+TIME_BANDS = [30, 60, 120]
+
+# Geocoding
+GEOCODER_USER_AGENT = "stroke-access-ca-research"
+GEOCODE_CACHE_CSV = "centres_geocode_cache.csv"
+GEOCODER_PAUSE_SECONDS = 1.2
+GEOCODER_MAX_RETRIES = 3
+GEOCODER_COUNTRY_HINT = "Canada"
+
+# Output files
+OUT_ACCESS_METRICS_CSV = "access_metrics.csv"
+OUT_ACCESS_METRICS_PARQUET = "access_metrics.parquet"
+GRAPH_CACHE_DIR = "graphs_cache"
+ROUTING_CACHE_DIR = "routing_cache"
+
+# =========================
+# Helpers
+# =========================
+
+def ensure_dir(p: str) -> None:
+    os.makedirs(p, exist_ok=True)
+
+def to_str(x) -> str:
+    if pd.isna(x):
+        return ""
+    try:
+        xf = float(x)
+        if xf.is_integer():
+            return str(int(xf))
+    except Exception:
+        pass
+    return str(x).strip()
+
+def normalize_centre_type(v: str) -> str:
+    """
+    Maps your Excel Hospital type values to:
+      Comprehensive -> CSC
+      Primary -> PSC
+      Thrombolysis-ready -> SRH
+    """
+    v = (v or "").strip().lower()
+    if "comprehensive" in v:
+        return "CSC"
+    if "primary" in v:
+        return "PSC"
+    if "thrombolysis" in v:
+        return "SRH"
+    return "UNKNOWN"
+
+def bandify(x: float, cuts: list[int]) -> str:
+    if pd.isna(x):
+        return "missing"
+    a, b, c = cuts
+    if x <= a:
+        return f"<= {a}"
+    if x <= b:
+        return f"{a+1}-{b}"
+    if x <= c:
+        return f"{b+1}-{c}"
+    return f"> {c}"
+
+def read_boundaries() -> gpd.GeoDataFrame:
+    if BOUNDARY_LAYER:
+        gdf = gpd.read_file(BOUNDARY_FILE, layer=BOUNDARY_LAYER)
+    else:
+        gdf = gpd.read_file(BOUNDARY_FILE)
+    gdf = gdf.to_crs(4326)
+    if GEO_ID_COL not in gdf.columns:
+        raise ValueError(f"Missing {GEO_ID_COL} in boundaries. Found: {list(gdf.columns)[:40]}")
+    if PROVINCE_COL not in gdf.columns:
+        raise ValueError(f"Missing {PROVINCE_COL} in boundaries. Found: {list(gdf.columns)[:40]}")
+    gdf[GEO_ID_COL] = gdf[GEO_ID_COL].apply(to_str)
+    return gdf
+
+def add_centroids(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    gdf = gdf.copy()
+    rp = gdf.geometry.representative_point()
+    gdf["centroid_lon"] = rp.x
+    gdf["centroid_lat"] = rp.y
+    return gdf
+
+def read_census_profile() -> pd.DataFrame | None:
+    if not CENSUS_PROFILE_CSV or not os.path.exists(CENSUS_PROFILE_CSV):
+        print("Census profile CSV not provided/found — continuing without demographics.")
+        return None
+    df = pd.read_csv(CENSUS_PROFILE_CSV)
+    df.columns = [c.strip() for c in df.columns]
+    if CENSUS_JOIN_COL not in df.columns:
+        raise ValueError(f"Missing {CENSUS_JOIN_COL} in census profile.")
+    df[CENSUS_JOIN_COL] = df[CENSUS_JOIN_COL].apply(to_str)
+    keep = [c for c in CENSUS_KEEP_COLS if c in df.columns]
+    return df[keep].copy()
+
+def load_geos() -> pd.DataFrame:
+    gdf = read_boundaries()
+    gdf = add_centroids(gdf)
+
+    census = read_census_profile()
+    if census is not None:
+        gdf = gdf.merge(census, left_on=GEO_ID_COL, right_on=CENSUS_JOIN_COL, how="left")
+
+    # Keep geometry for later if you want mapping; for routing we just need centroids + ids
+    return gdf
+
+def load_cache() -> pd.DataFrame:
+    if os.path.exists(GEOCODE_CACHE_CSV):
+        c = pd.read_csv(GEOCODE_CACHE_CSV)
+        c.columns = [x.strip() for x in c.columns]
+        return c
+    return pd.DataFrame(columns=["query", "lat", "lon", "display_name", "success"])
+
+def save_cache(cache: pd.DataFrame) -> None:
+    cache.to_csv(GEOCODE_CACHE_CSV, index=False)
+
+def build_geocode_query(row: pd.Series) -> str:
+    parts = [str(row.get("centre_name", "")).strip()]
+    if CENTRE_ADDRESS_COL and CENTRE_ADDRESS_COL in row and pd.notna(row[CENTRE_ADDRESS_COL]):
+        parts.append(str(row[CENTRE_ADDRESS_COL]).strip())
+    parts.append(str(row.get("city", "")).strip())
+    parts.append(str(row.get("prov", "")).strip())
+    parts.append(GEOCODER_COUNTRY_HINT)
+    parts = [p for p in parts if p and p.lower() != "nan"]
+    return ", ".join(parts)
 
 def load_and_geocode_centres() -> pd.DataFrame:
     print(f"Downloading stroke centres from: {STROKE_CENTRES_URL}...")
