@@ -86,7 +86,10 @@ CENSUS_KEEP_COLS = [
     "Visible_minority_pct", "Age65plus_pct", "Rural_flag"
 ]
 
-STROKE_CENTRES_XLSX = resource_path("stroke_centers.xlsx") # <- your master list Excel
+
+# STROKE_CENTRES_XLSX = resource_path("stroke_centers.xlsx") # <- OLD local file
+# Google Sheets URL (Export as CSV for "Master list" sheet)
+STROKE_CENTRES_URL = "https://docs.google.com/spreadsheets/d/1iswC1SgUTdS63Nve-5CyWh9H9H8xOpA247w6889vqj8/gviz/tq?tqx=out:csv&sheet=Master%20list"
 
 CENTRES_SHEET = "Master list"
 CENTRE_NAME_COL = "Hospital"
@@ -222,8 +225,11 @@ def build_geocode_query(row: pd.Series) -> str:
     return ", ".join(parts)
 
 def load_and_geocode_centres() -> pd.DataFrame:
-    df = pd.read_excel(STROKE_CENTRES_XLSX, sheet_name=CENTRES_SHEET)
+    print(f"Downloading stroke centres from: {STROKE_CENTRES_URL}...")
+    # Read DIRECTLY from Google Sheets CSV export
+    df = pd.read_csv(STROKE_CENTRES_URL)
     df.columns = [c.strip() for c in df.columns]
+
 
     for c in [CENTRE_NAME_COL, CENTRE_CITY_COL, CENTRE_PROVINCE_COL, CENTRE_TYPE_COL]:
         if c not in df.columns:
@@ -392,7 +398,7 @@ def main():
     print("=== STARTING STROKE ACCESS ANALYSIS ===")
     
     # Debug: Check bundled files
-    for f, name in [(BOUNDARY_FILE, "Boundary File"), (STROKE_CENTRES_XLSX, "Centres File")]:
+    for f, name in [(BOUNDARY_FILE, "Boundary File")]:
         if os.path.exists(f):
             size_mb = os.path.getsize(f) / (1024 * 1024)
             print(f"Checking {name}: Found at {f} ({size_mb:.2f} MB)")
