@@ -28,6 +28,7 @@ jobs:
         pip install -r requirements.txt
 
     - name: Build with PyInstaller
+      shell: bash
       # --onefile: create a single executable
       # --add-data: bundle the data files. Format is source;dest (Windows) or source:dest (Mac/Linux)
       # We use a shell-agnostic way or separate commands if needed, but given the complexity, we'll try to rely on the script finding files relative to itself or use specific separators.
