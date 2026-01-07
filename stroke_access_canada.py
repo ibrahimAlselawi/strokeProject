@@ -402,8 +402,30 @@ def build_graph_for_province(points_gdf: gpd.GeoDataFrame, pruid: str):
         return ox.load_graphml(graph_path)
 
     hull = unary_union(points_gdf.geometry).convex_hull.buffer(0.2)
-    print(f"Downloading OSM graph for PRUID={pruid} ...")
-    G = ox.graph_from_polygon(hull, network_type="drive", simplify=True)
+    # Huge Speedup: Increase loading chunk size (default is conservative)
+    # Since we are filtering for major roads only (low density), we can request huge areas.
+    ox.settings.max_query_area_size = 50 * 1000 * 50 * 1000  # 2500 sq km per chunk? 
+    # Actually default is 50*50km. The log said "561 times".
+    # Let's try 10x larger.
+    ox.settings.max_query_area_size = 2e9 # 2 billion m2 = 2000 km2. 
+    # Let's go even bigger for "highway only"
+    
+    # Define a "Skeleton" network filter (Motorway -> Tertiary)
+    # Excludes: residential, unclassified, service, etc.
+    # This reduces graph size by ~80% ensuring fast download & routing.
+    cf = (
+        '["highway"~"motorway|motorway_link|trunk|trunk_link|primary|primary_link|'
+        'secondary|secondary_link|tertiary|tertiary_link"]'
+    )
+    
+    print(f"Downloading OSM graph for PRUID={pruid} (Highways Only)...")
+    try:
+        # Use custom_filter instead of network_type="drive"
+        G = ox.graph_from_polygon(hull, custom_filter=cf, simplify=True)
+    except Exception:
+        print(" ! Error with skeleton network, falling back to standard drivable network (slow)...")
+        G = ox.graph_from_polygon(hull, network_type="drive", simplify=True)
+
     G = ox.add_edge_speeds(G)
     G = ox.add_edge_travel_times(G)
     ox.save_graphml(G, graph_path)
