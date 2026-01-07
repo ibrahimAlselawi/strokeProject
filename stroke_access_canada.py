@@ -292,12 +292,24 @@ def load_and_geocode_centres() -> pd.DataFrame:
     centres["geocode_display"] = disp
 
     failures = centres[~centres["geocode_ok"] | centres["lat"].isna() | centres["lon"].isna()]
+    failures = centres[~centres["geocode_ok"] | centres["lat"].isna() | centres["lon"].isna()]
     if len(failures) > 0:
-        failures.to_csv("centres_geocode_failures.csv", index=False)
-        raise ValueError(
-            f"Geocoding failed for {len(failures)} hospitals. "
-            f"See centres_geocode_failures.csv. Best fix: add an Address column or correct names."
-        )
+        fail_file = "centres_geocode_failures.csv"
+        try:
+            # Try to save next to the executable if frozen
+            if getattr(sys, 'frozen', False):
+                fail_file = os.path.join(os.path.dirname(sys.executable), "centres_geocode_failures.csv")
+        except Exception:
+            pass
+            
+        failures.to_csv(fail_file, index=False)
+        print(f"\n⚠️ WARNING: Geocoding failed for {len(failures)} hospitals.")
+        print(f"   These hospitals will be SKIPPED in the analysis.")
+        print(f"   List saved to: {fail_file}")
+        print("   To fix: Update your Excel file with an 'Address' column and cleaner names.\n")
+        
+        # Filter out failures
+        centres = centres[centres["geocode_ok"] & centres["lat"].notna() & centres["lon"].notna()].copy()
 
     return centres[["centre_name", "centre_type", "lat", "lon"]].copy()
 
