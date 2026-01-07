@@ -342,7 +342,19 @@ def route_times_one_province(geos: gpd.GeoDataFrame, centres: pd.DataFrame, prui
     print(f"Saved routing: {out_path}")
     return out
 
+import traceback
+
 def main():
+    print("=== STARTING STROKE ACCESS ANALYSIS ===")
+    
+    # Debug: Check bundled files
+    for f, name in [(BOUNDARY_FILE, "Boundary File"), (STROKE_CENTRES_XLSX, "Centres File")]:
+        if os.path.exists(f):
+            size_mb = os.path.getsize(f) / (1024 * 1024)
+            print(f"Checking {name}: Found at {f} ({size_mb:.2f} MB)")
+        else:
+            print(f"Checking {name}: NOT FOUND at {f}")
+
     print("=== Load geographies (boundaries + centroids) ===")
     geos_gdf = load_geos()
     geos_gdf = gpd.GeoDataFrame(geos_gdf, geometry=geos_gdf.geometry, crs=4326)
@@ -390,4 +402,12 @@ def main():
     print(f"Geocode cache: {GEOCODE_CACHE_CSV}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        print("\n\n!!! CRITICAL ERROR !!!")
+        traceback.print_exc()
+        print("\n")
+    
+    input("Press Enter to exit...")
+
