@@ -473,9 +473,19 @@ def route_times_one_province(geos: gpd.GeoDataFrame, centres: pd.DataFrame, prui
 
     G = build_graph_for_province(sub_points, pruid)
     
+    # Project graph to UTM (meters) for accurate distance & robust nearest_node lookup
+    # This also allows using cKDTree (scipy) instead of BallTree (sklearn) which avoids the ImportError if sklearn is missing (though we added it).
+    print("Projecting graph to UTM...")
+    G = ox.project_graph(G)
+    
     # 2. Vectorized Node Lookup for Origins (Massive speedup vs loop)
     print("Finding nearest graph nodes for all origins...")
-    origin_nodes = ox.distance.nearest_nodes(G, X=sub_points["centroid_lon"], Y=sub_points["centroid_lat"])
+    
+    # We must project our points to the same CRS as the graph
+    graph_crs = G.graph['crs']
+    sub_points_proj = sub_points.to_crs(graph_crs)
+    
+    origin_nodes = ox.distance.nearest_nodes(G, X=sub_points_proj.geometry.x, Y=sub_points_proj.geometry.y)
     sub_points["origin_node"] = origin_nodes
 
     # 3. Reverse Graph Optimization
@@ -534,17 +544,15 @@ def route_times_one_province(geos: gpd.GeoDataFrame, centres: pd.DataFrame, prui
             try:
                 # Find hospital node
                 # Note: This hospital node must be in THIS province's graph.
-                # If the hospital is in Montreal but we are routing Ontario, it might be outside the graph?
-                # If so, nearest_nodes might pick a border node or error?
-                # ox.nearest_nodes picks the closest node in G.
-                # If hospital is 500km away, it picks the border node.
-                # Then we calculate travel time from that border node.
-                # This is "okay" but assumes graph covers the whole path.
-                # Since we download graph for PRUID, it only covers that province.
-                # Cross-border routing requires a larger graph.
-                # For this specific "one file" requirement, we assume intra-province mostly.
                 
-                dest_node = ox.distance.nearest_nodes(G, X=c["lon"], Y=c["lat"])
+                # Project hospital lat/lon to graph CRS
+                # Create a simple GDF for the single point
+                c_pt = gpd.GeoDataFrame(
+                    geometry=gpd.points_from_xy([c["lon"]], [c["lat"]]), 
+                    crs=4326
+                ).to_crs(graph_crs)
+                
+                dest_node = ox.distance.nearest_nodes(G, X=c_pt.geometry.x.iloc[0], Y=c_pt.geometry.y.iloc[0])
                 
                 # Calculate time to ALL nodes from this hospital on G_rev
                 # cutoff=None means complete tree
